@@ -16,15 +16,18 @@
     <style>
       html, body {
         margin: 0; padding: 0; height: 100%;
-        overflow: hidden; background: #000;
+        background: #000; overflow: hidden;
       }
-      /* Prevent stretching: let the video fill without squishing */
+      /* Avoid stretching: maintain aspect ratio; show letterboxing as needed */
       video#arjs-video {
-        object-fit: cover !important;
+        object-fit: contain !important;
+        width: 100% !important; height: 100% !important;
+        transform: scaleX(1) scaleY(1); /* ensure no accidental flips/scales */
+      }
+      /* Prevent canvas from overflowing */
+      canvas.a-canvas {
         width: 100% !important; height: 100% !important;
       }
-      /* Keep canvas from introducing odd scaling */
-      canvas { max-width: 100% !important; max-height: 100% !important; }
     </style>
   </head>
   <body>
@@ -34,16 +37,18 @@
       renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true"
       arjs="
         sourceType: webcam;
-        trackingMethod: best;
-        detectionMode: mono;
+        facingMode: environment;      /* force back camera */
         debugUIEnabled: false;
+        detectionMode: mono;          /* pattern/hiro detection */
+        trackingMethod: best;
         videoTexture: true;
-        // NOTE: no sourceWidth/displayWidth here to avoid aspect distortion
+        sourceWidth: 1920; sourceHeight: 1080;   /* request higher-res stream */
+        displayWidth: 1920; displayHeight: 1080; /* keep aspect consistent */
       "
     >
-      <!-- Content sticks to the detected marker -->
+      <!-- Put content ON the marker -->
       <a-marker type="pattern" url="pattern-QRtiger.patt" emitevents="true">
-        <!-- A 1m x 1m plane lying on the marker surface -->
+        <!-- Flat image on the marker (1m x 1m) -->
         <a-plane
           position="0 0 0"
           rotation="-90 0 0"
@@ -52,16 +57,42 @@
           src="paragraph.png"
         ></a-plane>
 
-        <!-- Optional: a small box hovering above the marker for easy visibility -->
+        <!-- A small hover cube for easy visibility when marker locks -->
         <a-box position="0 0.15 0" depth="0.05" height="0.05" width="0.05" color="#39f"></a-box>
       </a-marker>
 
-      <!-- Static camera with a wider FOV to avoid the zoomed-in feel -->
-      <a-entity camera="fov: 78" look-controls="enabled: false"></a-entity>
+      <!-- Static camera; wider FOV reduces the “zoomed” feel -->
+      <a-entity camera="fov: 82" look-controls="enabled: false"></a-entity>
     </a-scene>
 
     <script>
-      // Quick debug: see marker detection in the browser console
+      // Extra push for Android Chrome to use back camera + HD if the AR.js params are ignored.
+      // Some devices honor getUserMedia constraints better when requested directly.
+      (function enforceEnvCamera() {
+        // AR.js will create a video element with id="arjs-video"
+        const tryApplyConstraints = () => {
+          const vid = document.getElementById('arjs-video');
+          if (!vid || !vid.srcObject) return;
+          const track = vid.srcObject.getVideoTracks()[0];
+          if (!track || typeof track.applyConstraints !== 'function') return;
+
+          track.applyConstraints({
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30 }
+          }).catch(() => {/* silently ignore if not supported */});
+        };
+        // Try a few times after load as AR.js attaches the stream asynchronously
+        let attempts = 0;
+        const timer = setInterval(() => {
+          attempts++;
+          tryApplyConstraints();
+          if (attempts > 10) clearInterval(timer);
+        }, 500);
+      })();
+
+      // Marker debug logs
       document.addEventListener('DOMContentLoaded', function () {
         const marker = document.querySelector('a-marker');
         if (!marker) return;
