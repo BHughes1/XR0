@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <title>AR.js • Hiro (Direct Camera Stream)</title>
+  <title>AR.js • Hiro (Patched getUserMedia)</title>
 
   <!-- A-Frame -->
   <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
@@ -12,16 +12,16 @@
 
   <style>
     html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
-    /* Keep video aspect; change to 'cover' if you prefer edge-to-edge with possible crop */
+    /* Prevent stretch; switch to 'cover' for edge-to-edge (may crop) */
     video#arjs-video { object-fit: contain !important; width:100% !important; height:100% !important; }
     canvas.a-canvas { width:100% !important; height:100% !important; }
 
-    /* Overlay UI */
+    /* Overlay */
     #overlay {
-      position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center;
-      background:#000; color:#fff; padding:24px; text-align:center; font:16px/1.5 system-ui, sans-serif;
+      position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+      background:#000; color:#fff; z-index:20; text-align:center; padding:24px;
+      font:16px/1.5 system-ui, sans-serif;
     }
-    #overlay.hidden { display:none; }
     #overlay button {
       margin-top:12px; padding:12px 16px; border:0; border-radius:10px; font-weight:700;
       background:#1e90ff; color:#fff;
@@ -38,115 +38,79 @@
   </style>
 </head>
 <body>
-  <!-- Permission overlay -->
   <div id="overlay">
     <div>
-      <div id="msg">This demo needs your camera to show AR content on the HIRO marker.</div>
-      <button id="startBtn">Allow Camera & Start AR</button>
+      <div>This demo needs your camera to show AR content on the <b>HIRO</b> marker.</div>
+      <button id="startBtn">Start AR</button>
       <div style="margin-top:10px; font-size:12px; opacity:.8">
-        If prompted, tap <b>Allow</b>. If you previously blocked the camera: Chrome → lock icon → Site settings → Camera → Allow, then return and tap the button again.
+        If you previously blocked the camera: Chrome → lock icon → Site settings → Camera → Allow, then tap Start again.
       </div>
     </div>
   </div>
-
-  <!-- Status HUD -->
   <div id="hud">status: booting…</div>
 
-  <!-- Scene (hidden until we have a stream) -->
-  <a-scene id="scene" style="display:none"
-    embedded
-    vr-mode-ui="enabled: false"
-    renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true"
-    arjs="sourceType: webcam; detectionMode: mono; trackingMethod: best; debugUIEnabled: false;"
-  >
-    <!-- Default HIRO marker -->
-    <a-marker preset="hiro" emitevents="true">
-      <a-plane position="0 0 0" rotation="-90 0 0" width="1" height="1" color="#ffffff"></a-plane>
-      <a-box position="0 0.15 0" depth="0.1" height="0.1" width="0.1" color="#39f"></a-box>
-      <a-entity position="0 0.35 0" text="value: HIRO detected; align: center; width: 2"></a-entity>
-    </a-marker>
-
-    <!-- Slightly wider FOV reduces the “zoomed” feel -->
-    <a-entity camera="fov: 80"></a-entity>
-  </a-scene>
+  <div id="app"></div> <!-- we inject the scene here AFTER the patch -->
 
   <script>
-    const overlay = document.getElementById('overlay');
-    const startBtn = document.getElementById('startBtn');
-    const sceneEl = document.getElementById('scene');
     const hud = document.getElementById('hud');
-    const msg = document.getElementById('msg');
-
     const setHUD = (t, cls='') => { hud.textContent = 'status: ' + t; hud.className = cls; hud.style.display='block'; console.log('[AR]', t); };
 
     let savedStream = null;
 
-    // Request camera; prefer back camera, fallback to any if needed.
-    async function getCameraStream() {
-      // First try: back camera at reasonable res
+    async function acquireCamera() {
+      // Try back camera at reasonable size; fallback to "any camera"
       try {
         return await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false
         });
       } catch (e1) {
-        console.warn('Back-camera request failed, retrying with loose constraints:', e1);
-        // Fallback: any camera, no size constraints
+        console.warn('Back camera failed, retrying with loose constraints:', e1);
         return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       }
     }
 
-    // Inject our stream into AR.js' video element once it exists.
-    function handStreamToAR() {
-      const tryAttach = () => {
-        const v = document.getElementById('arjs-video');
-        if (!v) return requestAnimationFrame(tryAttach);
-
-        // Only attach if AR.js hasn't already attached a stream
-        if (!v.srcObject && savedStream) {
-          v.srcObject = savedStream;
-          v.setAttribute('playsinline', '');
-          v.setAttribute('webkit-playsinline', '');
-          v.muted = true;
-          v.autoplay = true;
-          v.addEventListener('loadedmetadata', () =>
-            setHUD(`camera streaming ${v.videoWidth}x${v.videoHeight}`)
-          );
-          // On some devices you must call play() explicitly
-          v.play().catch(()=>{ /* ignore */ });
-          setHUD('camera stream attached to AR.js video');
-        }
+    function patchGetUserMedia(stream) {
+      // Force AR.js (and anything else) to use our already-open stream
+      const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = function(constraints) {
+        console.log('[AR] getUserMedia patched; returning saved stream', constraints);
+        return Promise.resolve(stream);
       };
-      tryAttach();
+      // Keep a reference in case you ever want to restore: navigator.mediaDevices.getUserMedia = orig;
     }
 
-    async function startAR() {
-      setHUD('requesting camera…');
-      try {
-        savedStream = await getCameraStream();
-        setHUD('camera granted; launching AR…');
-      } catch (e) {
-        const name = (e && e.name) ? e.name : '';
-        let hint = '';
-        if (name === 'NotAllowedError' || name === 'SecurityError') {
-          hint = '\nCamera permission is blocked. Chrome → lock icon → Site settings → Camera → Allow.';
-        } else if (name === 'NotReadableError') {
-          hint = '\nCamera is busy (used by another app/tab). Close other apps, force-close Chrome, or reboot.';
-        } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-          hint = '\nNo suitable camera found. Try removing constraints or a different browser/device.';
-        }
-        setHUD(`camera error: ${name || e}\n${hint}`, 'error');
-        return;
-      }
+    function injectScene() {
+      // Build the <a-scene> AFTER patching gUM so AR.js takes our stream
+      document.getElementById('app').innerHTML = `
+        <a-scene
+          embedded
+          vr-mode-ui="enabled: false"
+          renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true"
+          arjs="sourceType: webcam; detectionMode: mono; trackingMethod: best; debugUIEnabled: false;"
+        >
+          <a-marker preset="hiro" emitevents="true">
+            <a-plane position="0 0 0" rotation="-90 0 0" width="1" height="1" color="#ffffff"></a-plane>
+            <a-box position="0 0.15 0" depth="0.1" height="0.1" width="0.1" color="#39f"></a-box>
+            <a-entity position="0 0.35 0" text="value: HIRO; align: center; width: 2"></a-entity>
+          </a-marker>
+          <a-entity camera="fov: 80"></a-entity>
+        </a-scene>
+      `;
 
-      // Show the scene and let AR.js initialize, then attach our stream.
-      overlay.classList.add('hidden');
-      sceneEl.style.display = '';
-      handStreamToAR();
-
-      // Re-attach if AR.js recreates the video element later
-      const obs = new MutationObserver(() => handStreamToAR());
-      obs.observe(document.body, { childList: true, subtree: true });
+      // When AR.js creates its <video id="arjs-video">, ensure it's wired correctly
+      const ensureVideoReady = () => {
+        const v = document.getElementById('arjs-video');
+        if (!v) return requestAnimationFrame(ensureVideoReady);
+        if (!v.srcObject && savedStream) v.srcObject = savedStream;
+        v.setAttribute('playsinline',''); v.setAttribute('webkit-playsinline',''); v.muted = true; v.autoplay = true;
+        v.addEventListener('loadedmetadata', () =>
+          setHUD(`camera streaming ${v.videoWidth}x${v.videoHeight}`)
+        );
+        // Sometimes explicit play helps
+        v.play().catch(()=>{});
+      };
+      ensureVideoReady();
 
       // Marker debug
       const marker = document.querySelector('a-marker');
@@ -156,21 +120,45 @@
       }
     }
 
-    startBtn.addEventListener('click', startAR);
-
-    // If permission already granted, skip button
-    (async () => {
+    async function start() {
+      setHUD('requesting camera…');
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        s.getTracks().forEach(t => t.stop()); // test only
-        // We have permission; start immediately
-        startAR();
-      } catch {
-        // Will wait for user tap
+        savedStream = await acquireCamera();
+        setHUD('camera granted; patching getUserMedia and launching AR…');
+      } catch (e) {
+        const name = e && e.name ? e.name : '';
+        let hint = '';
+        if (name === 'NotAllowedError' || name === 'SecurityError') {
+          hint = '\nCamera permission is blocked. Chrome → lock icon → Site settings → Camera → Allow.';
+        } else if (name === 'NotReadableError') {
+          hint = '\nCamera is busy (another app/tab is using it). Close others, force-close Chrome, or reboot.';
+        } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+          hint = '\nNo suitable camera found. Try removing constraints or another browser/device.';
+        }
+        setHUD(`camera error: ${name || e}\n${hint}`, 'error');
+        return;
       }
-    })();
 
-    // Surface unexpected runtime errors
+      // Patch and build scene
+      patchGetUserMedia(savedStream);
+      document.getElementById('overlay').style.display = 'none';
+      injectScene();
+
+      // If AR.js swaps/recreates the video later, reattach stream
+      const obs = new MutationObserver(() => {
+        const v = document.getElementById('arjs-video');
+        if (v && !v.srcObject && savedStream) {
+          v.srcObject = savedStream;
+          v.play().catch(()=>{});
+          setHUD('re-attached stream to AR.js video');
+        }
+      });
+      obs.observe(document.body, { childList: true, subtree: true });
+    }
+
+    document.getElementById('startBtn').addEventListener('click', start);
+
+    // Error surfacing
     window.addEventListener('error', e => setHUD('runtime error: ' + e.message + ' (see console)', 'error'));
     window.addEventListener('unhandledrejection', e => {
       const name = (e && e.reason && e.reason.name) ? e.reason.name : '';
