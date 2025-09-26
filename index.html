@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <title>AR.js • HIRO (Detects + Visible)</title>
+  <title>AR.js • HIRO (Marker-Camera, Guaranteed Visible)</title>
 
-  <!-- Stable combo that worked for you -->
+  <!-- Stable versions -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
 
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; }
 
-    /* Ensure AR.js video is visible behind WebGL */
+    /* Make AR.js camera video definitely visible behind the canvas */
     #arjs-video{
       position:fixed !important; inset:0 !important;
       width:100% !important; height:100% !important;
@@ -21,7 +21,7 @@
       background:#000;
     }
 
-    /* WebGL canvas sits above video and stays transparent */
+    /* WebGL above video, fully transparent */
     canvas.a-canvas{
       position:fixed !important; inset:0 !important;
       width:100% !important; height:100% !important;
@@ -29,18 +29,13 @@
     }
 
     /* HUD */
-    #hud{
-      position:fixed; top:8px; left:8px; z-index:2;
-      background:rgba(0,0,0,.65); color:#0f0; font:12px/1.4 monospace;
-      padding:6px 8px; border-radius:6px; white-space:pre-wrap; max-width:90vw; display:none
-    }
+    #hud{position:fixed; top:8px; left:8px; z-index:2; background:rgba(0,0,0,.65); color:#0f0;
+         font:12px/1.4 monospace; padding:6px 8px; border-radius:6px; white-space:pre-wrap; max-width:90vw; display:none}
     #hud.show{display:block} #hud.error{display:block; background:rgba(160,0,0,.85); color:#fff}
 
     /* Start overlay */
-    #overlay{
-      position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
-      background:#000; color:#fff; z-index:3; text-align:center; padding:24px; font:16px/1.5 system-ui,sans-serif
-    }
+    #overlay{position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+             background:#000; color:#fff; z-index:3; text-align:center; padding:24px; font:16px/1.5 system-ui,sans-serif}
     #overlay button{margin-top:12px; padding:12px 16px; border:0; border-radius:10px; font-weight:700; background:#1e90ff; color:#fff}
   </style>
 </head>
@@ -85,25 +80,36 @@
         <a-scene
           id="scene"
           embedded
-          vr-mode-ui="enabled: false"
-          renderer="alpha: true; antialias: true; logarithmicDepthBuffer: true"
+          vr-mode-ui="enabled:false"
+          renderer="alpha:true; antialias:true; logarithmicDepthBuffer:true"
           arjs="sourceType: webcam; detectionMode: mono; trackingMethod: best; debugUIEnabled: true; sourceWidth: 640; sourceHeight: 480; displayWidth: 1280; displayHeight: 720;"
         >
-          <!-- Small ambient, but we use emissive so lights don't matter -->
-          <a-entity light="type: ambient; intensity: 0.6"></a-entity>
+          <!-- Small ambient only (we use flat shader + double-sided so lighting isn't required) -->
+          <a-entity light="type: ambient; intensity: 0.5"></a-entity>
 
-          <!-- Use the standard marker entity (this was detecting for you) -->
-          <a-marker preset="hiro" emitevents="true">
-            <!-- BIG, flat, double-sided, emissive geometry so it's guaranteed visible -->
-            <a-box position="0 0.6 0" width="0.9" height="0.9" depth="0.9"
-                   material="shader: flat; color: #39f; side: double; emissive: #39f; emissiveIntensity: 1.0; metalness: 0; roughness: 1"></a-box>
-            <a-entity position="0 1.2 0"
-                      text="value: HIRO FOUND; align: center; width: 3.2; color: #00ff88"
-                      material="shader: flat; side: double"></a-entity>
-          </a-marker>
+          <!-- Marker-driven camera: the camera pose follows HIRO directly -->
+          <a-marker-camera preset="hiro" emitevents="true"></a-marker-camera>
 
-          <!-- Normal camera -->
-          <a-entity camera="fov: 80; near: 0.01; far: 1000"></a-entity>
+          <!-- WORLD CONTENT at marker origin (since camera moves with marker) -->
+          <!-- A bright solid cube -->
+          <a-entity id="solidCube"
+                    position="0 0.9 0"
+                    geometry="primitive: box; width: 1.0; height: 1.0; depth: 1.0"
+                    material="shader: flat; color: #39f; side: double; transparent: false;">
+          </a-entity>
+
+          <!-- A wireframe outline slightly larger so it's impossible to miss -->
+          <a-entity id="wireCube"
+                    position="0 0.9 0"
+                    geometry="primitive: box; width: 1.05; height: 1.05; depth: 1.05"
+                    material="shader: flat; color: #fff; side: double; wireframe: true;">
+          </a-entity>
+
+          <!-- Floating text above -->
+          <a-entity position="0 1.6 0"
+                    text="value: HIRO FOUND; align: center; width: 3.2; color: #00ff88"
+                    material="shader: flat; side: double">
+          </a-entity>
         </a-scene>
       `;
 
@@ -112,12 +118,8 @@
       const scene = document.getElementById('scene');
       scene.addEventListener('arReady', () => log('arReady (AR.js initialized)'));
       scene.addEventListener('arError', e => log('arError: ' + (e && e.detail ? e.detail : 'unknown'), 'error'));
-
-      const marker = document.querySelector('a-marker');
-      if (marker){
-        marker.addEventListener('markerFound', () => log('markerFound'));
-        marker.addEventListener('markerLost',  () => log('markerLost'));
-      }
+      scene.addEventListener('markerFound', () => log('markerFound'));
+      scene.addEventListener('markerLost',  () => log('markerLost'));
     }
 
     async function start(){
