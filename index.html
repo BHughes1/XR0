@@ -4,25 +4,41 @@
   <meta charset="utf-8" />
   <meta name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <title>AR.js • HIRO (Marker-Camera + VideoTexture)</title>
+  <title>AR.js • HIRO (Fixed & Visible)</title>
 
-  <!-- Stable pair -->
+  <!-- Stable versions -->
   <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
 
   <style>
     html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; }
-    /* Fill the screen with the WebGL canvas */
-    canvas.a-canvas { position:fixed !important; inset:0 !important; width:100% !important; height:100% !important; }
-    /* Simple HUD */
-    #hud { position:fixed; top:8px; left:8px; z-index:10; background:rgba(0,0,0,.65); color:#0f0;
-           font:12px/1.4 monospace; padding:6px 8px; border-radius:6px; display:none; white-space:pre-wrap; max-width:90vw; }
+    /* We render the video as a GL texture, so only the canvas needs to fill screen */
+    canvas.a-canvas {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      background: #000 !important;   /* alpha: false => opaque */
+    }
+    /* HUD */
+    #hud {
+      position: fixed; top: 8px; left: 8px; z-index: 10;
+      background: rgba(0,0,0,.65); color: #0f0;
+      font: 12px/1.4 monospace; padding: 6px 8px; border-radius: 6px;
+      white-space: pre-wrap; max-width: 90vw; display: none;
+    }
     #hud.show { display:block; }
-    #hud.error { display:block; background:rgba(160,0,0,.85); color:#fff; }
+    #hud.error { display:block; background: rgba(160,0,0,.85); color: #fff; }
     /* Start overlay */
-    #overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:#000; color:#fff; z-index:11;
-               text-align:center; padding:24px; font:16px/1.5 system-ui,sans-serif; }
-    #overlay button { margin-top:12px; padding:12px 16px; border:0; border-radius:10px; font-weight:700; background:#1e90ff; color:#fff; }
+    #overlay {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #000; color: #fff; z-index: 11; text-align: center; padding: 24px;
+      font: 16px/1.5 system-ui, sans-serif;
+    }
+    #overlay button {
+      margin-top: 12px; padding: 12px 16px; border: 0; border-radius: 10px; font-weight: 700;
+      background: #1e90ff; color: #fff;
+    }
   </style>
 </head>
 <body>
@@ -36,6 +52,7 @@
     </div>
   </div>
   <div id="hud">status: booting…</div>
+
   <div id="app"></div>
 
   <script>
@@ -45,7 +62,6 @@
     const log = (t, cls='show') => { hud.textContent = 'status: ' + t; hud.className = cls; console.log('[AR]', t); };
 
     async function warmUpPermission() {
-      // Trigger the permission prompt under a user gesture; release immediately.
       const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       s.getTracks().forEach(t => t.stop());
     }
@@ -57,32 +73,22 @@
           embedded
           vr-mode-ui="enabled: false"
           renderer="alpha: false; antialias: true; logarithmicDepthBuffer: true"
-          arjs="
-            sourceType: webcam;
-            videoTexture: true;            /* render camera inside WebGL */
-            detectionMode: mono;
-            trackingMethod: best;
-            debugUIEnabled: false;
-            sourceWidth: 640; sourceHeight: 480;
-            displayWidth: 1280; displayHeight: 720;
-          "
+          arjs="sourceType: webcam; videoTexture: true; detectionMode: mono; trackingMethod: best; debugUIEnabled: false; sourceWidth: 640; sourceHeight: 480; displayWidth: 1280; displayHeight: 720;"
         >
-          <!-- Ambient light (emissive materials used below, but keep this) -->
           <a-entity light="type: ambient; intensity: 1.0"></a-entity>
 
-          <!-- Marker-driven camera (camera pose matches marker directly) -->
-          <a-marker-camera preset="hiro" emitevents="true"></a-marker-camera>
+          <!-- Standard marker entity -->
+          <a-marker preset="hiro" emitevents="true">
+            <!-- Big emissive geometry so it pops -->
+            <a-box position="0 0.25 0" depth="0.35" height="0.35" width="0.35"
+                   material="color: #39f; emissive: #39f; emissiveIntensity: 0.9; metalness: 0; roughness: 1"></a-box>
+            <a-entity position="0 0.7 0"
+                      text="value: HIRO FOUND; align: center; width: 3; color: #00ff88"
+                      material="side: double"></a-entity>
+          </a-marker>
 
-          <!-- Content at the marker origin (world coords), big & emissive -->
-          <a-entity position="0 0.5 0"
-                    geometry="primitive: box; depth: 0.35; height: 0.35; width: 0.35"
-                    material="color: #39f; emissive: #39f; emissiveIntensity: 0.9; metalness: 0; roughness: 1">
-          </a-entity>
-
-          <a-entity position="0 0.9 0"
-                    text="value: HIRO FOUND; align: center; width: 3; color: #00ff88"
-                    material="side: double">
-          </a-entity>
+          <!-- Normal camera -->
+          <a-entity camera="fov: 80; near: 0.01; far: 1000"></a-entity>
         </a-scene>
       `;
 
@@ -90,10 +96,11 @@
       scene.addEventListener('arReady', () => log('arReady (AR.js initialized)'));
       scene.addEventListener('arError', e => log('arError: ' + (e && e.detail ? e.detail : 'unknown'), 'error'));
 
-      // We’re using marker-camera; hook its events on the underlying <a-marker> it creates
-      // (Some builds still propagate on <a-marker-camera> itself—listen to both.)
-      scene.addEventListener('markerFound', () => log('markerFound'));
-      scene.addEventListener('markerLost',  () => log('markerLost'));
+      const marker = document.querySelector('a-marker');
+      if (marker){
+        marker.addEventListener('markerFound', () => log('markerFound'));
+        marker.addEventListener('markerLost',  () => log('markerLost'));
+      }
     }
 
     async function start() {
@@ -118,7 +125,7 @@
     startBtn.addEventListener('click', go, { passive:false });
     startBtn.addEventListener('touchend', go, { passive:false });
 
-    // Surface unexpected errors on screen
+    // Show unexpected errors on-screen
     window.addEventListener('error', e => log('runtime error: ' + e.message, 'error'));
     window.addEventListener('unhandledrejection', e => {
       const name = (e && e.reason && e.reason.name) ? e.reason.name : '';
