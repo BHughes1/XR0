@@ -2,154 +2,83 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
-    />
-    <title>AR.js • Hiro Marker (Robust)</title>
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <title>AR.js • Hiro Marker (Safe Minimal)</title>
 
     <!-- A-Frame (stable) -->
     <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
-    <!-- AR.js for A-Frame (npm build via jsdelivr) -->
+    <!-- AR.js for A-Frame (stable npm build) -->
     <script src="https://cdn.jsdelivr.net/npm/ar.js@3.4.5/aframe/build/aframe-ar.js"></script>
 
     <style>
-      html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; }
-      /* Keep the camera video from stretching; letterbox if needed */
-      video#arjs-video {
-        object-fit: contain !important;
-        width: 100% !important;
-        height: 100% !important;
-      }
-      /* Ensure the WebGL canvas fills but doesn't overflow */
+      html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
+      /* Avoid squish: keep native aspect; letterbox if needed */
+      video#arjs-video { object-fit: contain !important; width:100% !important; height:100% !important; }
       canvas.a-canvas { width:100% !important; height:100% !important; }
-      /* HUD for clear diagnostics */
-      #hud {
-        position: fixed; top: 8px; left: 8px; z-index: 10;
-        background: rgba(0,0,0,.65); color:#0f0;
-        font: 12px/1.4 monospace; padding:6px 8px; border-radius:6px; max-width: 80vw;
-        white-space: pre-wrap;
+      /* Start overlay */
+      #start {
+        position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+        background:#000; color:#fff; z-index:20; font:16px/1.4 system-ui, sans-serif; text-align:center;
+        padding:24px;
       }
-      #hud.error { color:#fff; background: rgba(160,0,0,.8); }
-      #hud.warn  { color:#000; background: rgba(255,215,0,.85); }
+      #start button {
+        margin-top:12px; padding:12px 16px; border:0; border-radius:8px; font-weight:600;
+      }
+      /* HUD */
+      #hud {
+        position:fixed; top:8px; left:8px; z-index:10;
+        background:rgba(0,0,0,.65); color:#0f0; font:12px/1.4 monospace;
+        padding:6px 8px; border-radius:6px; max-width:80vw; white-space:pre-wrap;
+      }
+      #hud.error { color:#fff; background:rgba(160,0,0,.85); }
+      #hud.warn  { color:#000; background:rgba(255,215,0,.9); }
     </style>
   </head>
   <body>
-    <div id="hud">status: booting…</div>
+    <div id="start">
+      <div>
+        <div>Tap to start AR (camera access required)</div>
+        <button id="go">Start</button>
+        <div id="permnote" style="margin-top:8px; opacity:0.8; font-size:12px;">
+          If you previously blocked the camera: Chrome → lock icon → Site settings → Camera → Allow
+        </div>
+      </div>
+    </div>
+    <div id="hud" style="display:none">status: booting…</div>
 
-    <!-- Scene builds after we verify camera access in the script below -->
-    <a-scene
-      id="scene"
+    <!-- Scene is created after tap (user gesture) -->
+    <a-scene id="scene" style="display:none"
       embedded
       vr-mode-ui="enabled: false"
       renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true"
       arjs="
         sourceType: webcam;
-        facingMode: environment;   /* prefer back camera */
-        detectionMode: mono;       /* marker/pattern mode */
+        facingMode: environment;
+        detectionMode: mono;
         trackingMethod: best;
         debugUIEnabled: false;
         videoTexture: true;
       "
-      style="display:none"
     >
-      <!-- Default HIRO marker -->
+      <!-- Default Hiro marker -->
       <a-marker preset="hiro" emitevents="true">
-        <!-- Flat 1m plane on the marker -->
         <a-plane position="0 0 0" rotation="-90 0 0" width="1" height="1" color="#ffffff"></a-plane>
-        <!-- Floating cube for obvious visual lock -->
         <a-box position="0 0.15 0" depth="0.1" height="0.1" width="0.1" color="#39f"></a-box>
-        <!-- Label -->
         <a-entity position="0 0.35 0" text="value: HIRO detected; align: center; width: 2"></a-entity>
       </a-marker>
 
-      <!-- Static camera; wider FOV to reduce the “zoomed” feel -->
+      <!-- Wider FOV reduces “zoomed-in” feel -->
       <a-entity camera="fov: 82" look-controls="enabled: false"></a-entity>
     </a-scene>
 
     <script>
-      const hud = document.getElementById('hud');
+      const startEl = document.getElementById('start');
       const sceneEl = document.getElementById('scene');
+      const hud = document.getElementById('hud');
+      const setHUD = (t, cls) => { hud.style.display=''; hud.textContent = 'status: ' + t; hud.className = cls || ''; console.log('[AR]', t); };
 
-      function setHUD(text, cls) {
-        hud.textContent = 'status: ' + text;
-        hud.className = cls ? cls : '';
-        console.log('[AR]', text);
-      }
-
-      async function preflightCameraCheck() {
-        // Insecure context? (Camera requires HTTPS except on localhost.)
-        if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-          setHUD('insecure context – use HTTPS (camera blocked)', 'error');
-          return false;
-        }
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          setHUD('mediaDevices.getUserMedia not available on this browser', 'error');
-          return false;
-        }
-        try {
-          // Try to get the back camera at a reasonable resolution. Immediately stop tracks.
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: { ideal: 'environment' },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              frameRate: { ideal: 30 }
-            },
-            audio: false
-          });
-          stream.getTracks().forEach(t => t.stop());
-          setHUD('camera check passed – building AR scene…');
-          return true;
-        } catch (err) {
-          let msg = 'camera error: ' + (err && err.name ? err.name : err);
-          if (err && err.name) {
-            if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
-              msg += '\nTip: allow camera permission in Chrome → lock icon → Site settings.';
-            } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
-              msg += '\nTip: no suitable camera found; close other apps using the camera and retry.';
-            }
-          }
-          setHUD(msg, 'error');
-          return false;
-        }
-      }
-
-      // Initialize AR after preflight; also wire up diagnostics.
-      (async function boot() {
-        const ok = await preflightCameraCheck();
-        if (!ok) return;
-
-        // Show scene and let AR.js spin up
+      // Build scene AFTER a user gesture. If camera attach fails, AR.js will throw; we show it.
+      document.getElementById('go').addEventListener('click', async () => {
+        startEl.style.display = 'none';
         sceneEl.style.display = '';
-        setHUD('requesting camera… (watch for permission prompt)');
-
-        // Watch for AR.js video readiness
-        (function watchVideo() {
-          const v = document.getElementById('arjs-video');
-          if (!v) { requestAnimationFrame(watchVideo); return; }
-          v.setAttribute('playsinline', '');
-          v.setAttribute('webkit-playsinline', '');
-          v.muted = true;
-          v.addEventListener('loadedmetadata', () => {
-            setHUD(`camera streaming ${v.videoWidth}x${v.videoHeight}`);
-          });
-        })();
-
-        // Marker detection feedback
-        const marker = document.querySelector('a-marker');
-        if (marker) {
-          marker.addEventListener('markerFound', () => setHUD('marker FOUND'));
-          marker.addEventListener('markerLost',  () => setHUD('marker lost…', 'warn'));
-        }
-
-        // Global error visibility
-        window.addEventListener('error', (e) => setHUD('runtime error – see console\n' + e.message, 'error'));
-        window.addEventListener('unhandledrejection', (e) => {
-          setHUD('promise rejection – see console', 'error');
-          console.error(e.reason || e);
-        });
-      })();
-    </script>
-  </body>
-</html>
