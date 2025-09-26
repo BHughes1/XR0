@@ -4,24 +4,39 @@
     <meta charset="utf-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <!-- Modern A-Frame + AR.js (marker-based) -->
-    <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
     <title>Marker AR</title>
-    <style>html,body{margin:0; padding:0; overflow:hidden;}</style>
+
+    <!-- A-Frame (modern) -->
+    <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
+    <!-- AR.js for A-Frame (marker-based) -->
+    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
+
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #000; }
+      /* Help some mobile browsers avoid weird scaling artifacts */
+      canvas, video { max-width: 100% !important; }
+      /* If AR.js creates a video element with id="arjs-video", keep it contained */
+      #arjs-video { object-fit: contain !important; }
+    </style>
   </head>
   <body>
     <a-scene
       embedded
-      renderer="logarithmicDepthBuffer: true;"
       vr-mode-ui="enabled: false"
-      arjs="sourceType: webcam; debugUIEnabled: false;"
+      renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true"
+      arjs="
+        sourceType: webcam;
+        debugUIEnabled: false;
+        videoTexture: true;
+        sourceWidth: 1280; sourceHeight: 720;
+        displayWidth: 1280; displayHeight: 720;
+      "
     >
-      <!-- Attach content to the marker -->
+      <!-- Attach your content to the marker -->
       <a-marker type="pattern" url="pattern-QRtiger.patt">
-        <!-- Option A: use a-plane (lies on the marker) -->
+        <!-- Lies flat on the marker (1 meter square by default) -->
         <a-plane
           position="0 0 0"
           rotation="-90 0 0"
@@ -30,12 +45,16 @@
           src="paragraph.png"
         ></a-plane>
 
-        <!-- Option B: or a floating image above the marker -->
-        <!-- <a-image position="0 0.5 0" width="1" height="1" src="paragraph.png"></a-image> -->
+        <!-- Example: float the same image 0.5m above the marker
+        <a-image position="0 0.5 0" width="1" height="1" src="paragraph.png"></a-image>
+        -->
       </a-marker>
 
-      <!-- Static camera -->
-      <a-entity camera></a-entity>
+      <!-- Static camera with a wider field of view -->
+      <a-entity camera="fov: 75" look-controls="enabled: false"></a-entity>
     </a-scene>
+
+    <!-- Tip: if your marker looks small in real life, you can scale content up:
+         e.g., wrap children in <a-entity scale="1.5 1.5 1.5"> ... </a-entity> -->
   </body>
 </html>
