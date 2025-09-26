@@ -14,11 +14,17 @@
     <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
 
     <style>
-      html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #000; }
-      /* Help some mobile browsers avoid weird scaling artifacts */
-      canvas, video { max-width: 100% !important; }
-      /* If AR.js creates a video element with id="arjs-video", keep it contained */
-      #arjs-video { object-fit: contain !important; }
+      html, body {
+        margin: 0; padding: 0; height: 100%;
+        overflow: hidden; background: #000;
+      }
+      /* Prevent stretching: let the video fill without squishing */
+      video#arjs-video {
+        object-fit: cover !important;
+        width: 100% !important; height: 100% !important;
+      }
+      /* Keep canvas from introducing odd scaling */
+      canvas { max-width: 100% !important; max-height: 100% !important; }
     </style>
   </head>
   <body>
@@ -28,15 +34,16 @@
       renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true"
       arjs="
         sourceType: webcam;
+        trackingMethod: best;
+        detectionMode: mono;
         debugUIEnabled: false;
         videoTexture: true;
-        sourceWidth: 1280; sourceHeight: 720;
-        displayWidth: 1280; displayHeight: 720;
+        // NOTE: no sourceWidth/displayWidth here to avoid aspect distortion
       "
     >
-      <!-- Attach your content to the marker -->
-      <a-marker type="pattern" url="pattern-QRtiger.patt">
-        <!-- Lies flat on the marker (1 meter square by default) -->
+      <!-- Content sticks to the detected marker -->
+      <a-marker type="pattern" url="pattern-QRtiger.patt" emitevents="true">
+        <!-- A 1m x 1m plane lying on the marker surface -->
         <a-plane
           position="0 0 0"
           rotation="-90 0 0"
@@ -45,16 +52,22 @@
           src="paragraph.png"
         ></a-plane>
 
-        <!-- Example: float the same image 0.5m above the marker
-        <a-image position="0 0.5 0" width="1" height="1" src="paragraph.png"></a-image>
-        -->
+        <!-- Optional: a small box hovering above the marker for easy visibility -->
+        <a-box position="0 0.15 0" depth="0.05" height="0.05" width="0.05" color="#39f"></a-box>
       </a-marker>
 
-      <!-- Static camera with a wider field of view -->
-      <a-entity camera="fov: 75" look-controls="enabled: false"></a-entity>
+      <!-- Static camera with a wider FOV to avoid the zoomed-in feel -->
+      <a-entity camera="fov: 78" look-controls="enabled: false"></a-entity>
     </a-scene>
 
-    <!-- Tip: if your marker looks small in real life, you can scale content up:
-         e.g., wrap children in <a-entity scale="1.5 1.5 1.5"> ... </a-entity> -->
+    <script>
+      // Quick debug: see marker detection in the browser console
+      document.addEventListener('DOMContentLoaded', function () {
+        const marker = document.querySelector('a-marker');
+        if (!marker) return;
+        marker.addEventListener('markerFound',  () => console.log('[AR] markerFound'));
+        marker.addEventListener('markerLost',   () => console.log('[AR] markerLost'));
+      });
+    </script>
   </body>
 </html>
