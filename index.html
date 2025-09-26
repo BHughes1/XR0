@@ -2,9 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <title>AR.js • Hiro with Permission Prompt</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>AR.js • Hiro (Direct Camera Stream)</title>
 
   <!-- A-Frame -->
   <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
@@ -13,7 +12,7 @@
 
   <style>
     html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
-    /* Keep video from stretching; switch to cover for edge-to-edge */
+    /* Keep video aspect; change to 'cover' if you prefer edge-to-edge with possible crop */
     video#arjs-video { object-fit: contain !important; width:100% !important; height:100% !important; }
     canvas.a-canvas { width:100% !important; height:100% !important; }
 
@@ -27,23 +26,25 @@
       margin-top:12px; padding:12px 16px; border:0; border-radius:10px; font-weight:700;
       background:#1e90ff; color:#fff;
     }
-    #msg { white-space:pre-wrap; opacity:.9; }
+
+    /* HUD */
     #hud {
       position:fixed; top:8px; left:8px; z-index:10;
       background:rgba(0,0,0,.65); color:#0f0; font:12px/1.4 monospace;
       padding:6px 8px; border-radius:6px; max-width:80vw; white-space:pre-wrap; display:none;
     }
     #hud.error { color:#fff; background:rgba(160,0,0,.85); display:block; }
+    #hud.warn  { color:#000; background:rgba(255,215,0,.9); display:block; }
   </style>
 </head>
 <body>
-  <!-- Startup/permission overlay -->
+  <!-- Permission overlay -->
   <div id="overlay">
     <div>
       <div id="msg">This demo needs your camera to show AR content on the HIRO marker.</div>
       <button id="startBtn">Allow Camera & Start AR</button>
       <div style="margin-top:10px; font-size:12px; opacity:.8">
-        Tip: If you previously blocked the camera, tap the lock icon in Chrome → Site settings → Camera → Allow, then return here and tap the button again.
+        If prompted, tap <b>Allow</b>. If you previously blocked the camera: Chrome → lock icon → Site settings → Camera → Allow, then return and tap the button again.
       </div>
     </div>
   </div>
@@ -51,7 +52,7 @@
   <!-- Status HUD -->
   <div id="hud">status: booting…</div>
 
-  <!-- Scene is injected after permission succeeds -->
+  <!-- Scene (hidden until we have a stream) -->
   <a-scene id="scene" style="display:none"
     embedded
     vr-mode-ui="enabled: false"
@@ -64,6 +65,8 @@
       <a-box position="0 0.15 0" depth="0.1" height="0.1" width="0.1" color="#39f"></a-box>
       <a-entity position="0 0.35 0" text="value: HIRO detected; align: center; width: 2"></a-entity>
     </a-marker>
+
+    <!-- Slightly wider FOV reduces the “zoomed” feel -->
     <a-entity camera="fov: 80"></a-entity>
   </a-scene>
 
@@ -74,90 +77,104 @@
     const hud = document.getElementById('hud');
     const msg = document.getElementById('msg');
 
-    function setHUD(t, isError=false){ hud.textContent = 'status: ' + t; hud.className = isError ? 'error' : ''; hud.style.display='block'; console.log('[AR]', t); }
+    const setHUD = (t, cls='') => { hud.textContent = 'status: ' + t; hud.className = cls; hud.style.display='block'; console.log('[AR]', t); };
 
-    // Try to read current permission state (not supported everywhere)
-    async function getCameraPermissionState(){
-      if (!('permissions' in navigator)) return 'unknown';
-      try {
-        const s = await navigator.permissions.query({ name: 'camera' });
-        return s.state; // 'granted' | 'denied' | 'prompt'
-      } catch { return 'unknown'; }
-    }
+    let savedStream = null;
 
-    async function requestCameraOnce(){
-      // Trigger real prompt via getUserMedia (user gesture required)
+    // Request camera; prefer back camera, fallback to any if needed.
+    async function getCameraStream() {
+      // First try: back camera at reasonable res
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } }, audio: false
+        return await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
         });
-        // We only needed permission; stop tracks and let AR.js take over
-        stream.getTracks().forEach(t => t.stop());
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, error: e };
+      } catch (e1) {
+        console.warn('Back-camera request failed, retrying with loose constraints:', e1);
+        // Fallback: any camera, no size constraints
+        return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       }
     }
 
-    function bootAR(){
+    // Inject our stream into AR.js' video element once it exists.
+    function handStreamToAR() {
+      const tryAttach = () => {
+        const v = document.getElementById('arjs-video');
+        if (!v) return requestAnimationFrame(tryAttach);
+
+        // Only attach if AR.js hasn't already attached a stream
+        if (!v.srcObject && savedStream) {
+          v.srcObject = savedStream;
+          v.setAttribute('playsinline', '');
+          v.setAttribute('webkit-playsinline', '');
+          v.muted = true;
+          v.autoplay = true;
+          v.addEventListener('loadedmetadata', () =>
+            setHUD(`camera streaming ${v.videoWidth}x${v.videoHeight}`)
+          );
+          // On some devices you must call play() explicitly
+          v.play().catch(()=>{ /* ignore */ });
+          setHUD('camera stream attached to AR.js video');
+        }
+      };
+      tryAttach();
+    }
+
+    async function startAR() {
+      setHUD('requesting camera…');
+      try {
+        savedStream = await getCameraStream();
+        setHUD('camera granted; launching AR…');
+      } catch (e) {
+        const name = (e && e.name) ? e.name : '';
+        let hint = '';
+        if (name === 'NotAllowedError' || name === 'SecurityError') {
+          hint = '\nCamera permission is blocked. Chrome → lock icon → Site settings → Camera → Allow.';
+        } else if (name === 'NotReadableError') {
+          hint = '\nCamera is busy (used by another app/tab). Close other apps, force-close Chrome, or reboot.';
+        } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+          hint = '\nNo suitable camera found. Try removing constraints or a different browser/device.';
+        }
+        setHUD(`camera error: ${name || e}\n${hint}`, 'error');
+        return;
+      }
+
+      // Show the scene and let AR.js initialize, then attach our stream.
       overlay.classList.add('hidden');
       sceneEl.style.display = '';
-      setHUD('starting AR (watch for camera feed)…');
-      // Ensure inline playback once AR.js video appears
-      (function waitVideo(){
-        const v = document.getElementById('arjs-video');
-        if (!v) return requestAnimationFrame(waitVideo);
-        v.setAttribute('playsinline',''); v.setAttribute('webkit-playsinline',''); v.muted = true;
-        v.addEventListener('loadedmetadata', () => setHUD(`camera streaming ${v.videoWidth}x${v.videoHeight}`));
-      })();
+      handStreamToAR();
+
+      // Re-attach if AR.js recreates the video element later
+      const obs = new MutationObserver(() => handStreamToAR());
+      obs.observe(document.body, { childList: true, subtree: true });
+
       // Marker debug
       const marker = document.querySelector('a-marker');
       if (marker){
         marker.addEventListener('markerFound', () => setHUD('marker FOUND'));
-        marker.addEventListener('markerLost',  () => setHUD('marker lost…'));
+        marker.addEventListener('markerLost',  () => setHUD('marker lost…', 'warn'));
       }
     }
 
-    startBtn.addEventListener('click', async () => {
-      setHUD('requesting camera permission…');
-      const res = await requestCameraOnce();
-      if (res.ok){
-        setHUD('permission granted; launching AR…');
-        bootAR();
-      } else {
-        const name = (res.error && res.error.name) ? res.error.name : '';
-        let hint = '';
-        if (name === 'NotAllowedError' || name === 'SecurityError'){
-          hint = '\nCamera permission is blocked.\nChrome → lock icon → Site settings → Camera → Allow\nThen return and tap the button again.';
-        } else if (name === 'NotReadableError'){
-          hint = '\nCamera is busy (used by another app or tab).\nClose other apps using the camera (QR scanners, video calls), force-close Chrome, or reboot.';
-        } else if (name === 'NotFoundError' || name === 'OverconstrainedError'){
-          hint = '\nNo suitable camera found. Remove constraints or try another browser/device.';
-        }
-        setHUD(`camera error: ${name || res.error}\n${hint}`, true);
-        msg.textContent = `We couldn't access the camera (${name || res.error}).\n${hint}\n\nAfter fixing, tap the button to try again.`;
-      }
-    });
+    startBtn.addEventListener('click', startAR);
 
-    // If already granted, skip the overlay and start immediately
+    // If permission already granted, skip button
     (async () => {
-      const state = await getCameraPermissionState();
-      if (state === 'granted'){
-        setHUD('camera already allowed; launching AR…');
-        bootAR();
-      } else if (state === 'denied'){
-        msg.textContent = 'Camera permission is currently blocked.\nChrome → lock icon → Site settings → Camera → Allow\nThen tap the button below.';
-      } else {
-        // 'prompt' or 'unknown' → wait for user tap
-        msg.textContent = 'This demo needs your camera to show AR content on the HIRO marker.\nTap the button to allow and start.';
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        s.getTracks().forEach(t => t.stop()); // test only
+        // We have permission; start immediately
+        startAR();
+      } catch {
+        // Will wait for user tap
       }
     })();
 
     // Surface unexpected runtime errors
-    window.addEventListener('error', e => setHUD('runtime error: ' + e.message + ' (see console)', true));
+    window.addEventListener('error', e => setHUD('runtime error: ' + e.message + ' (see console)', 'error'));
     window.addEventListener('unhandledrejection', e => {
       const name = (e && e.reason && e.reason.name) ? e.reason.name : '';
-      setHUD(`promise rejection${name ? ' ('+name+')' : ''} – see console`, true);
+      setHUD(`promise rejection${name ? ' ('+name+')' : ''} – see console`, 'error');
       console.error(e.reason || e);
     });
   </script>
