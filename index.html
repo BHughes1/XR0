@@ -1,38 +1,137 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"/>
-  <title>AR.js • HIRO (Robust Loader)</title>
-
+  <meta charset="utf-8" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>AR.js • HIRO (Multi-CDN Fallback)</title>
   <style>
     html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}
-    /* Prevent stretch (use 'cover' for edge-to-edge if you prefer) */
+    /* Prevent stretch (use 'cover' if you prefer edge-to-edge) */
     video#arjs-video{object-fit:contain!important;width:100%!important;height:100%!important}
     canvas.a-canvas{width:100%!important;height:100%!important;background:transparent!important}
-
-    /* Start overlay */
+    /* Overlay */
     #overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;color:#fff;z-index:9999;text-align:center;padding:24px;font:16px/1.5 system-ui,sans-serif}
     #overlay button{margin-top:12px;padding:12px 16px;border:0;border-radius:10px;font-weight:700;background:#1e90ff;color:#fff}
-
-    /* HUD + error panel */
+    /* HUD */
     #hud{position:fixed;top:8px;left:8px;z-index:10000;background:rgba(0,0,0,.65);color:#0f0;font:12px/1.4 monospace;padding:6px 8px;border-radius:6px;max-width:88vw;white-space:pre-wrap;display:none}
     #hud.error{color:#fff;background:rgba(160,0,0,.85);display:block}
     #hud.warn{color:#000;background:rgba(255,215,0,.9);display:block}
   </style>
-
   <script>
-    // ---- Tiny script loader with on-screen error reporting ----
+    // --- On-screen status ---
     function setHUD(t, cls){const h=document.getElementById('hud');h.textContent='status: '+t;h.className=cls||'';h.style.display='block';console.log('[AR]',t);}
-    async function loadScript(src){
-      return new Promise((resolve,reject)=>{
-        const s=document.createElement('script');
-        s.src=src; s.async=true; s.defer=true; s.crossOrigin="anonymous";
-        s.onload=()=>resolve();
-        s.onerror=(e)=>reject(new Error('Failed to load script: '+src));
-        document.head.appendChild(s);
-      });
+
+    // --- Script loader with fallbacks ---
+    function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.defer=true;s.crossOrigin='anonymous';s.onload=()=>res(src);s.onerror=()=>rej(new Error('Failed: '+src));document.head.appendChild(s);});}
+    async function tryLoad(name, urls){
+      const failures=[];
+      for(const u of urls){
+        try{ setHUD('loading '+name+'…\n'+u); await loadScript(u); setHUD(name+' loaded'); return u; }
+        catch(e){ failures.push(u); }
+      }
+      throw new Error('Could not load '+name+' from any CDN:\n- '+failures.join('\n- '));
     }
+
+    // --- Build the scene after libs are loaded ---
+    function injectScene(){
+      document.getElementById('app').innerHTML = `
+        <a-scene
+          id="scene"
+          embedded
+          vr-mode-ui="enabled: false"
+          renderer="alpha: true; antialias: true; logarithmicDepthBuffer: true"
+          arjs="
+            sourceType: webcam;
+            detectionMode: mono;
+            trackingMethod: best;
+            debugUIEnabled: false;
+            sourceWidth: 640; sourceHeight: 480;
+            displayWidth: 1280; displayHeight: 720;
+          "
+        >
+          <!-- Lights so overlay is visible on all devices -->
+          <a-entity light="type: ambient; intensity: 1.0"></a-entity>
+          <a-entity light="type: directional; intensity: 0.9" position="0 1 1"></a-entity>
+
+          <!-- HIRO marker + obvious geometry -->
+          <a-marker preset="hiro" emitevents="true">
+            <a-plane position="0 0 0" rotation="-90 0 0" width="1.2" height="1.2" color="#ffffff"></a-plane>
+            <a-box position="0 0.2 0" depth="0.12" height="0.12" width="0.12" color="#39f"></a-box>
+            <a-entity position="0 0.45 0" text="value: HIRO; align: center; width: 2.5; color: #00ff88"></a-entity>
+          </a-marker>
+
+          <a-entity camera="fov: 80"></a-entity>
+        </a-scene>
+      `;
+
+      // Ensure AR.js internal video actually plays and has size
+      const ensureVideo=()=>{const v=document.getElementById('arjs-video');
+        if(!v){requestAnimationFrame(ensureVideo);return;}
+        v.setAttribute('playsinline',''); v.setAttribute('webkit-playsinline',''); v.muted=true; v.autoplay=true;
+        v.addEventListener('loadedmetadata',()=>{setHUD('AR.js video ready: '+v.videoWidth+'×'+v.videoHeight); if(!v.videoWidth||!v.videoHeight)setHUD('Warning: AR.js video size is 0×0 — reload Chrome','warn');});
+        v.play().catch(()=>{});
+      }; ensureVideo();
+
+      const scene=document.getElementById('scene');
+      scene.addEventListener('arReady', ()=>setHUD('arReady (AR.js initialized)'));
+      scene.addEventListener('arError', e=>setHUD('arError: '+(e&&e.detail?e.detail:'unknown'),'error'));
+      const marker=document.querySelector('a-marker');
+      if(marker){ marker.addEventListener('markerFound',()=>setHUD('markerFound')); marker.addEventListener('markerLost',()=>setHUD('markerLost','warn')); }
+    }
+
+    async function startFlow(){
+      // 1) Prompt for camera under user gesture (then close test stream)
+      try{
+        setHUD('requesting camera…');
+        const s=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+        s.getTracks().forEach(t=>t.stop());
+      }catch(e){
+        const name=e&&e.name?e.name:''; let hint='';
+        if(name==='NotAllowedError'||name==='SecurityError') hint='\nEnable camera: Chrome → lock icon → Site settings → Camera → Allow.';
+        if(name==='NotReadableError') hint='\nCamera busy. Close other camera apps/tabs, force-close Chrome, or reboot.';
+        setHUD('camera error: '+(name||e)+hint,'error'); return;
+      }
+
+      // 2) Load libs with multiple fallbacks
+      try{
+        // A-Frame: prefer 1.2.0 then 1.0.4
+        await tryLoad('A-Frame', [
+          'https://aframe.io/releases/1.2.0/aframe.min.js',
+          'https://aframe.io/releases/1.0.4/aframe.min.js',
+          'https://unpkg.com/aframe@1.2.0/dist/aframe.min.js'
+        ]);
+
+        // AR.js (A-Frame build): try GitHub build first (very reliable), then npm/unpkg fallbacks
+        await tryLoad('AR.js (A-Frame build)', [
+          'https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js',
+          'https://cdn.jsdelivr.net/npm/ar.js@3.4.5/aframe/build/aframe-ar.js',
+          'https://unpkg.com/ar.js@3.4.5/aframe/build/aframe-ar.js',
+          'https://cdn.jsdelivr.net/npm/ar.js@3.3.2/aframe/build/aframe-ar.js',
+          'https://unpkg.com/ar.js@3.3.2/aframe/build/aframe-ar.js'
+        ]);
+      }catch(err){
+        setHUD(err.message+'\nTip: if CDNs are blocked on your network, download the file and serve it locally (see note below).','error');
+        return;
+      }
+
+      // 3) Build scene
+      document.getElementById('overlay').style.display='none';
+      setHUD('launching AR…');
+      injectScene();
+    }
+
+    // Global error surfacing (so you don’t need desktop console)
+    window.addEventListener('error', e=>{const details=(e.filename?('\n'+e.filename+':'+e.lineno+':'+e.colno):'')+(e.error&&e.error.stack?('\n'+e.error.stack):''); setHUD('runtime error: '+e.message+details,'error');});
+    window.addEventListener('unhandledrejection', e=>{const name=(e&&e.reason&&e.reason.name)?e.reason.name:''; const msg=(e&&e.reason&&e.reason.message)?(' – '+e.reason.message):''; setHUD('promise rejection'+(name?(' ('+name+')'):'')+msg,'error');});
+
+    // Wire up Start button (click + touch)
+    addEventListener('DOMContentLoaded', ()=>{
+      const btn=document.getElementById('startBtn');
+      const go=(ev)=>{ev.preventDefault();ev.stopPropagation();startFlow();};
+      btn.addEventListener('click',go,{passive:false});
+      btn.addEventListener('touchend',go,{passive:false});
+    });
   </script>
 </head>
 <body>
@@ -47,122 +146,5 @@
   </div>
   <div id="hud">status: booting…</div>
   <div id="app"></div>
-
-  <script>
-    const app=document.getElementById('app');
-    const overlay=document.getElementById('overlay');
-
-    async function warmUpPermission(){
-      // Trigger camera prompt under user gesture; close stream immediately
-      const test=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
-      test.getTracks().forEach(t=>t.stop());
-    }
-
-    function injectScene(){
-      app.innerHTML=`
-        <a-scene
-          id="scene"
-          embedded
-          vr-mode-ui="enabled:false"
-          renderer="alpha:true; antialias:true; logarithmicDepthBuffer:true"
-          arjs="
-            sourceType: webcam;
-            detectionMode: mono;
-            trackingMethod: best;
-            debugUIEnabled: false;
-            sourceWidth: 640; sourceHeight: 480;
-            displayWidth: 1280; displayHeight: 720;
-          "
-        >
-          <!-- Lights ensure visibility on all devices -->
-          <a-entity light="type: ambient; intensity: 1.0"></a-entity>
-          <a-entity light="type: directional; intensity: 0.9" position="0 1 1"></a-entity>
-
-          <!-- HIRO marker + obvious geometry -->
-          <a-marker preset="hiro" emitevents="true">
-            <a-plane position="0 0 0" rotation="-90 0 0" width="1.2" height="1.2" color="#ffffff"></a-plane>
-            <a-cylinder position="0 0.35 0" radius="0.1" height="0.7" color="#39f"></a-cylinder>
-            <a-cone position="0 0.8 0" radius-bottom="0.22" height="0.28" color="#f93"></a-cone>
-            <a-entity position="0 1.05 0" text="value: HIRO FOUND; align: center; width: 3; color: #00ff88"></a-entity>
-          </a-marker>
-
-          <a-entity camera="fov: 80"></a-entity>
-        </a-scene>
-      `;
-
-      // Ensure AR.js internal video is really playing and has size
-      const ensureArVideo=()=>{
-        const v=document.getElementById('arjs-video');
-        if(!v){requestAnimationFrame(ensureArVideo);return;}
-        v.setAttribute('playsinline',''); v.setAttribute('webkit-playsinline',''); v.muted=true; v.autoplay=true;
-        v.addEventListener('loadedmetadata',()=>{
-          setHUD('AR.js video ready: '+v.videoWidth+'×'+v.videoHeight);
-          if(!v.videoWidth||!v.videoHeight) setHUD('Warning: AR.js video size is 0×0 — reload or restart Chrome','warn');
-        });
-        v.play().catch(()=>{});
-      };
-      ensureArVideo();
-
-      const scene=document.getElementById('scene');
-      scene.addEventListener('arReady',()=>setHUD('arReady (AR.js initialized)'));
-      scene.addEventListener('arError',e=>setHUD('arError: '+(e&&e.detail?e.detail:'unknown'),'error'));
-
-      const marker=document.querySelector('a-marker');
-      if(marker){
-        marker.addEventListener('markerFound',()=>setHUD('markerFound'));
-        marker.addEventListener('markerLost',()=>setHUD('markerLost','warn'));
-      }
-    }
-
-    async function start(){
-      try{
-        setHUD('requesting camera…');
-        await warmUpPermission();
-      }catch(e){
-        const name=e&&e.name?e.name:'';
-        let hint='';
-        if(name==='NotAllowedError'||name==='SecurityError') hint='\nEnable camera: Chrome → lock icon → Site settings → Camera → Allow.';
-        if(name==='NotReadableError') hint='\nCamera busy. Close other camera apps/tabs, force-close Chrome, or reboot.';
-        setHUD('camera error: '+(name||e)+hint,'error'); return;
-      }
-
-      // Load libraries (stable pairing) with visible error if they fail
-      try{
-        setHUD('loading A-Frame…');
-        await loadScript('https://aframe.io/releases/1.0.4/aframe.min.js');
-        setHUD('loading AR.js…');
-        await loadScript('https://cdn.jsdelivr.net/npm/ar.js@3.3.2/aframe/build/aframe-ar.js');
-      }catch(err){
-        setHUD(err.message+'\nTry another network, or open this URL directly to verify it loads.', 'error');
-        return;
-      }
-
-      // Build the scene
-      overlay.style.display='none';
-      setHUD('launching AR…');
-      try{ injectScene(); }
-      catch(e){ setHUD('init error: '+(e&&e.message?e.message:e),'error'); }
-    }
-
-    // Start button — attach both click & touchend
-    (function hookStart(){
-      const btn=document.getElementById('startBtn');
-      const go=(ev)=>{ev.preventDefault();ev.stopPropagation();start();};
-      btn.addEventListener('click',go,{passive:false});
-      btn.addEventListener('touchend',go,{passive:false});
-    })();
-
-    // Show script errors on screen (not just console)
-    window.addEventListener('error', e=>{
-      // If cross-origin, browsers often give "Script error." — we still surface filename/line if available
-      const details = (e.filename?('\n'+e.filename+':'+e.lineno+':'+e.colno):'') + (e.error&&e.error.stack?('\n'+e.error.stack):'');
-      setHUD('runtime error: '+e.message+details,'error');
-    });
-    window.addEventListener('unhandledrejection', e=>{
-      const name=(e && e.reason && e.reason.name)?e.reason.name:'';
-      setHUD('promise rejection'+(name?(' ('+name+')'):'')+(e.reason&&e.reason.message?(' – '+e.reason.message):''),'error');
-      console.error(e.reason||e);
-    });
-  </script>
 </body>
 </html>
