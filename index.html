@@ -5,8 +5,9 @@
 <body style='margin : 0px; overflow: hidden;'>
   <a-scene embedded arjs='sourceType: webcam;'>
     <!-- create your content here. just a box for now -->
-    <a-plane position=”0 0.5 0" width=”1" height=”1" rotation=”-90 0 0" material=”src: url(paragraph.png);”></a-plane>
+    <a-image src="paragraph.png"></a-image>
     <!-- define a camera which will move according to the marker position -->
     <a-marker-camera type='pattern' url='pattern-QRtiger.patt'></a-marker-camera>
+	<a-plane position=”0 0.5 0" width=”1" height=”1" rotation=”-90 0 0" material=”src: url(paragraph.png);”></a-plane>
   </a-scene>
 </body>
