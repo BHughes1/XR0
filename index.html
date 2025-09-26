@@ -4,155 +4,157 @@
   <meta charset="utf-8" />
   <meta name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <title>AR.js • Hiro Minimal (Reliable Start)</title>
+  <title>AR.js • HIRO (Stable Pairing)</title>
 
-  <!-- A-Frame -->
-  <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
-  <!-- AR.js for A-Frame (stable npm build) -->
-  <script src="https://cdn.jsdelivr.net/npm/ar.js@3.4.5/aframe/build/aframe-ar.js"></script>
+  <!-- Use a known-good pairing -->
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ar.js@3.3.2/aframe/build/aframe-ar.js"></script>
 
   <style>
-    html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
-    /* Keep AR.js video from stretching; switch to 'cover' if you prefer edge-to-edge */
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; }
+    /* Prevent stretch (switch to 'cover' for edge-to-edge if you prefer) */
     video#arjs-video { object-fit: contain !important; width:100% !important; height:100% !important; }
     canvas.a-canvas { width:100% !important; height:100% !important; background:transparent !important; }
 
-    /* Start overlay – very high z-index to guarantee it's on top and clickable */
+    /* Start overlay */
     #overlay {
       position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
-      background:#000; color:#fff; z-index:99999; text-align:center; padding:24px;
+      background:#000; color:#fff; z-index:9999; text-align:center; padding:24px;
       font:16px/1.5 system-ui, sans-serif;
     }
-    #overlay.hidden { display:none; }
     #overlay button {
       margin-top:12px; padding:12px 16px; border:0; border-radius:10px; font-weight:700;
       background:#1e90ff; color:#fff;
     }
 
-    /* HUD for quick diagnostics */
+    /* HUD */
     #hud {
-      position:fixed; top:8px; left:8px; z-index:100000;
+      position:fixed; top:8px; left:8px; z-index:10000;
       background:rgba(0,0,0,.65); color:#0f0; font:12px/1.4 monospace;
-      padding:6px 8px; border-radius:6px; max-width:80vw; white-space:pre-wrap; display:none;
+      padding:6px 8px; border-radius:6px; max-width:85vw; white-space:pre-wrap; display:none;
     }
     #hud.error { color:#fff; background:rgba(160,0,0,.85); display:block; }
+    #hud.warn  { color:#000; background:rgba(255,215,0,.9); display:block; }
   </style>
 </head>
 <body>
-  <!-- Start / Permission overlay -->
   <div id="overlay">
     <div>
       <div>This demo needs your camera to show AR on the <b>HIRO</b> marker.</div>
       <button id="startBtn" type="button">Start AR</button>
       <div style="margin-top:10px; font-size:12px; opacity:.8">
-        If you blocked camera before: Chrome → lock icon → Site settings → Camera → Allow, then tap Start again.
+        If you blocked the camera: Chrome → lock icon → Site settings → Camera → Allow, then tap Start again.
       </div>
     </div>
   </div>
-
-  <!-- HUD -->
   <div id="hud">status: booting…</div>
-
-  <!-- We inject the scene into this container AFTER permission succeeds -->
   <div id="app"></div>
 
   <script>
-    const hud = document.getElementById('hud');
     const overlay = document.getElementById('overlay');
+    const hud = document.getElementById('hud');
     const app = document.getElementById('app');
-    const startBtn = document.getElementById('startBtn');
+    const log = (t, cls='') => { hud.textContent = 'status: ' + t; hud.className = cls; hud.style.display='block'; console.log('[AR]', t); };
 
-    function setHUD(t, isError=false){
-      hud.textContent = 'status: ' + t;
-      hud.className = isError ? 'error' : '';
-      hud.style.display = 'block';
-      console.log('[AR]', t);
+    async function warmUpPermission() {
+      // Light request to trigger the permission prompt under a user gesture; immediately release it.
+      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      s.getTracks().forEach(t => t.stop());
     }
 
-    // Ensure the button really receives a user gesture on all devices
-    const startHandler = async (ev) => {
-      ev.preventDefault(); ev.stopPropagation();
-      setHUD('requesting camera…');
-
-      // Step 1: explicitly request camera on the user gesture
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } }, audio: false
-        });
-      } catch (e) {
-        const name = e && e.name ? e.name : '';
-        let hint = '';
-        if (name === 'NotAllowedError' || name === 'SecurityError')
-          hint = '\nCamera permission blocked. Chrome → lock icon → Site settings → Camera → Allow.';
-        else if (name === 'NotReadableError')
-          hint = '\nCamera busy. Close other camera apps/tabs, force-close Chrome, or reboot.';
-        setHUD(`camera error: ${name || e}${hint}`, true);
-        return;
-      }
-
-      // Step 2: patch getUserMedia so AR.js uses the granted stream
-      const origGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-      navigator.mediaDevices.getUserMedia = () => Promise.resolve(stream);
-
-      // Step 3: hide overlay and inject a tiny Hiro scene
-      overlay.classList.add('hidden');
+    function injectScene() {
       app.innerHTML = `
         <a-scene
+          id="scene"
           embedded
           vr-mode-ui="enabled: false"
           renderer="alpha: true; antialias: true; logarithmicDepthBuffer: true"
-          arjs="sourceType: webcam; detectionMode: mono; trackingMethod: best; debugUIEnabled: false;"
-          id="scene"
+          arjs="
+            sourceType: webcam;
+            detectionMode: mono;
+            trackingMethod: best;
+            debugUIEnabled: false;
+            sourceWidth: 640; sourceHeight: 480;
+            displayWidth: 1280; displayHeight: 720;
+          "
         >
+          <!-- Lights so overlay is always visible -->
           <a-entity light="type: ambient; intensity: 1.0"></a-entity>
           <a-entity light="type: directional; intensity: 0.9" position="0 1 1"></a-entity>
 
+          <!-- HIRO marker with obvious geometry -->
           <a-marker preset="hiro" emitevents="true">
             <a-plane position="0 0 0" rotation="-90 0 0" width="1.2" height="1.2" color="#ffffff"></a-plane>
-            <a-box position="0 0.2 0" depth="0.12" height="0.12" width="0.12" color="#39f"></a-box>
-            <a-entity position="0 0.45 0" text="value: HIRO; align: center; width: 2.5; color: #00ff88"></a-entity>
+            <a-cylinder position="0 0.35 0" radius="0.1" height="0.7" color="#39f"></a-cylinder>
+            <a-cone position="0 0.8 0" radius-bottom="0.22" height="0.28" color="#f93"></a-cone>
+            <a-entity position="0 1.05 0" text="value: HIRO FOUND; align: center; width: 3; color: #00ff88"></a-entity>
           </a-marker>
 
           <a-entity camera="fov: 80"></a-entity>
         </a-scene>
       `;
 
-      // Step 4: ensure AR.js internal video really plays
-      const attachArVideo = () => {
+      const scene = document.getElementById('scene');
+
+      // When AR.js creates its internal video, make sure it really plays and has size
+      const ensureArVideo = () => {
         const v = document.getElementById('arjs-video');
-        if (!v) return requestAnimationFrame(attachArVideo);
-        if (!v.srcObject) v.srcObject = stream;
+        if (!v) return requestAnimationFrame(ensureArVideo);
         v.setAttribute('playsinline',''); v.setAttribute('webkit-playsinline',''); v.muted = true; v.autoplay = true;
         v.addEventListener('loadedmetadata', () => {
-          setHUD(`AR.js video ready: ${v.videoWidth}×${v.videoHeight}`);
-          if (!v.videoWidth || !v.videoHeight) setHUD('Warning: AR.js video size is 0×0 — reload or restart Chrome', true);
+          log(`AR.js video ready: ${v.videoWidth}×${v.videoHeight}`);
+          if (!v.videoWidth || !v.videoHeight) log('Warning: AR.js video has 0×0 size — reload or restart Chrome', 'warn');
         });
         v.play().catch(()=>{});
       };
-      attachArVideo();
+      ensureArVideo();
 
-      // Optional diagnostics
-      const scene = document.getElementById('scene');
-      scene.addEventListener('arReady', () => setHUD('arReady (AR.js initialized)'));
-      scene.addEventListener('arError', e => setHUD('arError: ' + (e && e.detail ? e.detail : 'unknown'), true));
-
+      // Diagnostics
+      scene.addEventListener('arReady', () => log('arReady (AR.js initialized)'));
+      scene.addEventListener('arError', e => log('arError: ' + (e && e.detail ? e.detail : 'unknown'), 'error'));
       const marker = document.querySelector('a-marker');
       if (marker){
-        marker.addEventListener('markerFound', () => setHUD('markerFound'));
-        marker.addEventListener('markerLost',  () => setHUD('markerLost'));
+        marker.addEventListener('markerFound', () => log('markerFound'));
+        marker.addEventListener('markerLost',  () => log('markerLost', 'warn'));
       }
-    };
+    }
 
-    // Attach both click and touchend to be safe
-    startBtn.addEventListener('click', startHandler, { passive: false });
-    startBtn.addEventListener('touchend', startHandler, { passive: false });
+    async function start() {
+      try {
+        log('requesting camera…');
+        await warmUpPermission(); // prompts once; we immediately stop the test stream
+      } catch (e) {
+        const name = e && e.name ? e.name : '';
+        let hint = '';
+        if (name === 'NotAllowedError' || name === 'SecurityError') hint = '\nEnable camera: Chrome → lock icon → Site settings → Camera → Allow.';
+        if (name === 'NotReadableError') hint = '\nCamera busy. Close other camera apps/tabs, force-close Chrome, or reboot.';
+        log(`camera error: ${name || e}${hint}`, 'error');
+        return;
+      }
+      overlay.style.display = 'none';
+      log('permission ok; launching AR…');
+      injectScene();
+    }
 
-    // Show a clear error if anything else breaks
-    window.addEventListener('error', e => setHUD('runtime error: ' + e.message + ' (see console)', true));
+    const startBtn = document.getElementById('startBtn');
+    const startHandler = (e) => { e.preventDefault(); e.stopPropagation(); start(); };
+    startBtn.addEventListener('click', startHandler, { passive:false });
+    startBtn.addEventListener('touchend', startHandler, { passive:false });
+
+    // If already granted (returning users), auto-start
+    (async () => {
+      try {
+        const t = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        t.getTracks().forEach(tr => tr.stop());
+        setTimeout(start, 50);
+      } catch { /* wait for tap */ }
+    })();
+
+    // Bubble unexpected errors
+    window.addEventListener('error', e => log('runtime error: ' + e.message + ' (see console)', 'error'));
     window.addEventListener('unhandledrejection', e => {
       const name = e && e.reason && e.reason.name ? e.reason.name : '';
-      setHUD(`promise rejection${name ? ' ('+name+')' : ''} – see console`, true);
+      log(`promise rejection${name ? ' ('+name+')' : ''} – see console`, 'error');
       console.error(e.reason || e);
     });
   </script>
