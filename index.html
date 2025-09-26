@@ -8,47 +8,42 @@
     />
     <title>Marker AR</title>
 
-    <!-- A-Frame (modern) -->
+    <!-- A-Frame (stable) -->
     <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
-    <!-- AR.js for A-Frame (marker-based) -->
+    <!-- AR.js for A-Frame -->
     <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
 
     <style>
-      html, body {
-        margin: 0; padding: 0; height: 100%;
-        background: #000; overflow: hidden;
-      }
-      /* Avoid stretching: maintain aspect ratio; show letterboxing as needed */
-      video#arjs-video {
-        object-fit: contain !important;
-        width: 100% !important; height: 100% !important;
-        transform: scaleX(1) scaleY(1); /* ensure no accidental flips/scales */
-      }
-      /* Prevent canvas from overflowing */
-      canvas.a-canvas {
-        width: 100% !important; height: 100% !important;
+      html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
+      /* Keep the AR video from stretching; letterbox if needed */
+      video#arjs-video { object-fit: contain !important; width:100% !important; height:100% !important; }
+      /* Ensure the canvas fills the screen but doesn't overflow */
+      canvas.a-canvas { width:100% !important; height:100% !important; }
+      /* Tiny status HUD (top-left) */
+      #hud {
+        position: fixed; top: 8px; left: 8px; z-index: 10;
+        background: rgba(0,0,0,.55); color:#0f0; font: 12px/1.4 monospace; padding:6px 8px; border-radius:6px;
       }
     </style>
   </head>
   <body>
+    <div id="hud">status: booting…</div>
+
     <a-scene
       embedded
       vr-mode-ui="enabled: false"
       renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true"
       arjs="
         sourceType: webcam;
-        facingMode: environment;      /* force back camera */
+        facingMode: environment;      /* prefer back camera */
         debugUIEnabled: false;
-        detectionMode: mono;          /* pattern/hiro detection */
+        detectionMode: mono;          /* marker/pattern mode */
         trackingMethod: best;
         videoTexture: true;
-        sourceWidth: 1920; sourceHeight: 1080;   /* request higher-res stream */
-        displayWidth: 1920; displayHeight: 1080; /* keep aspect consistent */
       "
     >
-      <!-- Put content ON the marker -->
+      <!-- Attach content to the marker -->
       <a-marker type="pattern" url="pattern-QRtiger.patt" emitevents="true">
-        <!-- Flat image on the marker (1m x 1m) -->
         <a-plane
           position="0 0 0"
           rotation="-90 0 0"
@@ -56,49 +51,43 @@
           height="1"
           src="paragraph.png"
         ></a-plane>
-
-        <!-- A small hover cube for easy visibility when marker locks -->
+        <!-- Small hover cube so you can tell when lock happens -->
         <a-box position="0 0.15 0" depth="0.05" height="0.05" width="0.05" color="#39f"></a-box>
       </a-marker>
 
-      <!-- Static camera; wider FOV reduces the “zoomed” feel -->
-      <a-entity camera="fov: 82" look-controls="enabled: false"></a-entity>
+      <!-- Static camera; slightly widened FOV to reduce “zoomed” feel -->
+      <a-entity camera="fov: 78" look-controls="enabled: false"></a-entity>
     </a-scene>
 
     <script>
-      // Extra push for Android Chrome to use back camera + HD if the AR.js params are ignored.
-      // Some devices honor getUserMedia constraints better when requested directly.
-      (function enforceEnvCamera() {
-        // AR.js will create a video element with id="arjs-video"
-        const tryApplyConstraints = () => {
-          const vid = document.getElementById('arjs-video');
-          if (!vid || !vid.srcObject) return;
-          const track = vid.srcObject.getVideoTracks()[0];
-          if (!track || typeof track.applyConstraints !== 'function') return;
+      // Simple diagnostics on screen + console
+      const hud = document.getElementById('hud');
+      const setHUD = (t) => { hud.textContent = 'status: ' + t; console.log('[AR]', t); };
 
-          track.applyConstraints({
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-            frameRate: { ideal: 30 }
-          }).catch(() => {/* silently ignore if not supported */});
-        };
-        // Try a few times after load as AR.js attaches the stream asynchronously
-        let attempts = 0;
-        const timer = setInterval(() => {
-          attempts++;
-          tryApplyConstraints();
-          if (attempts > 10) clearInterval(timer);
-        }, 500);
-      })();
+      // Report when AR.js attaches the camera stream
+      const watchVideoReady = () => {
+        const v = document.getElementById('arjs-video');
+        if (!v) { setHUD('waiting for camera…'); return requestAnimationFrame(watchVideoReady); }
+        setHUD('camera element ready; requesting stream…');
+        v.addEventListener('loadedmetadata', () => setHUD(`camera streaming ${v.videoWidth}x${v.videoHeight}`));
+        // Some devices need inline playback hints
+        v.setAttribute('playsinline', '');
+        v.setAttribute('webkit-playsinline', '');
+        v.muted = true;
+      };
+      watchVideoReady();
 
-      // Marker debug logs
-      document.addEventListener('DOMContentLoaded', function () {
+      // Marker detection feedback
+      document.addEventListener('DOMContentLoaded', () => {
         const marker = document.querySelector('a-marker');
         if (!marker) return;
-        marker.addEventListener('markerFound',  () => console.log('[AR] markerFound'));
-        marker.addEventListener('markerLost',   () => console.log('[AR] markerLost'));
+        marker.addEventListener('markerFound', () => setHUD('marker FOUND'));
+        marker.addEventListener('markerLost',  () => setHUD('marker lost…'));
       });
+
+      // If getUserMedia fails, AR.js logs to console; mirror a friendly hint
+      window.addEventListener('error', () => setHUD('error (see console)'));
+      window.addEventListener('unhandledrejection', () => setHUD('error (see console)'));
     </script>
   </body>
 </html>
