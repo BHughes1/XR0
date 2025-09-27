@@ -1,152 +1,93 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+
+<html>
+
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <title>AR.js • HIRO (Marker-Camera, Guaranteed Visible)</title>
 
-  <!-- Stable versions -->
-  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
+<script src="[https://aframe.io/releases/1.5.0/aframe.min.js](https://aframe.io/releases/1.5.0/aframe.min.js)"></script>
 
-  <style>
-    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; }
+<script src="[https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js](https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js)"></script>
 
-    /* Make AR.js camera video definitely visible behind the canvas */
-    #arjs-video{
-      position:fixed !important; inset:0 !important;
-      width:100% !important; height:100% !important;
-      object-fit:cover !important;
-      z-index:0 !important; display:block !important; visibility:visible !important; opacity:1 !important;
-      background:#000;
-    }
+<script src="[https://raw.githack.com/donmccurdy/aframe-extras/master/dist/aframe-extras.loaders.min.js](https://raw.githack.com/donmccurdy/aframe-extras/master/dist/aframe-extras.loaders.min.js)"></script>
 
-    /* WebGL above video, fully transparent */
-    canvas.a-canvas{
-      position:fixed !important; inset:0 !important;
-      width:100% !important; height:100% !important;
-      z-index:1 !important; background:transparent !important; pointer-events:none;
-    }
+<script src="[https://raw.githack.com/AR-js-org/studio-backend/master/src/modules/marker/tools/gesture-detector.js](https://raw.githack.com/AR-js-org/studio-backend/master/src/modules/marker/tools/gesture-detector.js)"></script>
 
-    /* HUD */
-    #hud{position:fixed; top:8px; left:8px; z-index:2; background:rgba(0,0,0,.65); color:#0f0;
-         font:12px/1.4 monospace; padding:6px 8px; border-radius:6px; white-space:pre-wrap; max-width:90vw; display:none}
-    #hud.show{display:block} #hud.error{display:block; background:rgba(160,0,0,.85); color:#fff}
+<script src="[https://raw.githack.com/AR-js-org/studio-backend/master/src/modules/marker/tools/gesture-handler.js](https://raw.githack.com/AR-js-org/studio-backend/master/src/modules/marker/tools/gesture-handler.js)"></script>
 
-    /* Start overlay */
-    #overlay{position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
-             background:#000; color:#fff; z-index:3; text-align:center; padding:24px; font:16px/1.5 system-ui,sans-serif}
-    #overlay button{margin-top:12px; padding:12px 16px; border:0; border-radius:10px; font-weight:700; background:#1e90ff; color:#fff}
-  </style>
 </head>
-<body>
-  <div id="overlay">
-    <div>
-      <div>This needs your camera to show AR on the <b>HIRO</b> marker.</div>
-      <button id="startBtn" type="button">Start AR</button>
-      <div style="margin-top:10px;font-size:12px;opacity:.8">If you blocked the camera: Chrome → lock icon → Site settings → Camera → Allow.</div>
-    </div>
-  </div>
 
-  <div id="hud">status: booting…</div>
-  <div id="app"></div>
+<body style="margin: 0; overflow: hidden">
 
-  <script>
-    const hud = document.getElementById('hud');
-    const overlay = document.getElementById('overlay');
-    const app = document.getElementById('app');
-    const log = (t, cls='show') => { hud.textContent = 'status: ' + t; hud.className = cls; console.log('[AR]', t); };
+<a-scene
 
-    async function warmUpPermission(){
-      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      s.getTracks().forEach(t => t.stop());
-    }
+vr-mode-ui="enabled: false;"
 
-    function ensureArVideoVisible(){
-      const tick = () => {
-        const v = document.getElementById('arjs-video');
-        if (!v) return requestAnimationFrame(tick);
-        v.setAttribute('playsinline',''); v.setAttribute('webkit-playsinline',''); v.muted = true; v.autoplay = true;
-        v.style.position='fixed'; v.style.inset='0'; v.style.width='100%'; v.style.height='100%';
-        v.style.objectFit='cover'; v.style.zIndex='0'; v.style.display='block'; v.style.visibility='visible'; v.style.opacity='1';
-        v.play().catch(()=>{});
-        v.addEventListener('loadedmetadata', ()=> log(`AR.js video ready: ${v.videoWidth}×${v.videoHeight}`));
-      };
-      tick();
-    }
+loading-screen="enabled: false;"
 
-    function injectScene(){
-      app.innerHTML = `
-        <a-scene
-          id="scene"
-          embedded
-          vr-mode-ui="enabled:false"
-          renderer="alpha:true; antialias:true; logarithmicDepthBuffer:true"
-          arjs="sourceType: webcam; detectionMode: mono; trackingMethod: best; debugUIEnabled: true; sourceWidth: 640; sourceHeight: 480; displayWidth: 1280; displayHeight: 720;"
-        >
-          <!-- Small ambient only (we use flat shader + double-sided so lighting isn't required) -->
-          <a-entity light="type: ambient; intensity: 0.5"></a-entity>
+renderer="logarithmicDepthBuffer: true;"
 
-          <!-- Marker-driven camera: the camera pose follows HIRO directly -->
-          <a-marker-camera preset="hiro" emitevents="true"></a-marker-camera>
+arjs="trackingMethod: best; sourceType: webcam; sourceWidth:1280; sourceHeight:960; displayWidth: 1280; displayHeight: 960; debugUIEnabled: false;"
 
-          <!-- WORLD CONTENT at marker origin (since camera moves with marker) -->
-          <!-- A bright solid cube -->
-          <a-entity id="solidCube"
-                    position="0 0.9 0"
-                    geometry="primitive: box; width: 1.0; height: 1.0; depth: 1.0"
-                    material="shader: flat; color: #39f; side: double; transparent: false;">
-          </a-entity>
+id="scene"
 
-          <!-- A wireframe outline slightly larger so it's impossible to miss -->
-          <a-entity id="wireCube"
-                    position="0 0.9 0"
-                    geometry="primitive: box; width: 1.05; height: 1.05; depth: 1.05"
-                    material="shader: flat; color: #fff; side: double; wireframe: true;">
-          </a-entity>
+xrweb="scale:absolute"
 
-          <!-- Floating text above -->
-          <a-entity position="0 1.6 0"
-                    text="value: HIRO FOUND; align: center; width: 3.2; color: #00ff88"
-                    material="shader: flat; side: double">
-          </a-entity>
-        </a-scene>
-      `;
+embedded
 
-      ensureArVideoVisible();
+gesture-detector
 
-      const scene = document.getElementById('scene');
-      scene.addEventListener('arReady', () => log('arReady (AR.js initialized)'));
-      scene.addEventListener('arError', e => log('arError: ' + (e && e.detail ? e.detail : 'unknown'), 'error'));
-      scene.addEventListener('markerFound', () => log('markerFound'));
-      scene.addEventListener('markerLost',  () => log('markerLost'));
-    }
+>
 
-    async function start(){
-      try{
-        log('requesting camera…');
-        await warmUpPermission();
-      }catch(e){
-        const name=e&&e.name?e.name:''; let hint='';
-        if(name==='NotAllowedError'||name==='SecurityError') hint='\nEnable camera: Chrome → lock icon → Site settings → Camera → Allow.';
-        if(name==='NotReadableError') hint='\nCamera busy. Close other camera apps/tabs, force-close Chrome, or reboot.';
-        log(`camera error: ${name || e}${hint}`,'error'); return;
-      }
-      overlay.style.display='none';
-      log('launching AR…');
-      injectScene();
-    }
+<a-assets>
 
-    const go = (ev)=>{ev.preventDefault(); ev.stopPropagation(); start();};
-    document.getElementById('startBtn').addEventListener('click', go, {passive:false});
-    document.getElementById('startBtn').addEventListener('touchend', go, {passive:false});
+<a-asset-item id="animated-asset" src="[https://cdn.glitch.global/1bc28f8f-8d53-4bed-a675-2db1ca5b2b87/MacbethBalls.glb?v=1705006592251](https://cdn.glitch.global/1bc28f8f-8d53-4bed-a675-2db1ca5b2b87/MacbethBalls.glb?v=1705006592251)"></a-asset-item>
 
-    window.addEventListener('error', e => log('runtime error: ' + e.message, 'error'));
-    window.addEventListener('unhandledrejection', e => {
-      const name=(e && e.reason && e.reason.name)?e.reason.name:'';
-      log(`promise rejection${name ? ' ('+name+')' : ''} – see console`, 'error');
-      console.error(e.reason || e);
-    });
-  </script>
+</a-assets>
+
+<a-marker
+
+id="animated-marker"
+
+type="pattern"
+
+preset="custom"
+
+url="pattern-QRtiger1.patt"
+
+raycaster="objects: .clickable"
+
+emitevents="true"
+
+cursor="fuse: false; rayOrigin: mouse;"
+
+>
+
+<a-entity
+
+scale="3 3 3"
+
+rotation="0 0 0"
+
+animation-mixer="loop: repeat"
+
+gltf-model="#animated-asset"
+
+class="clickable"
+
+gesture-handler
+
+></a-entity>
+
+</a-marker>
+
+<a-entity camera></a-entity>
+
+<a-light type="directional" light="castShadow:false;" intensity="3" position="2 4 4"></a-light>
+
+<a-light type="ambient" intensity="0.5" color="#BBB"></a-light>
+
+</a-scene>
+
 </body>
+
 </html>
